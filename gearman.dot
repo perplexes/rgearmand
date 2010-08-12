@@ -1,0 +1,37 @@
+digraph gearman {
+	rankdir=LR;
+	node [ shape = point ];
+	ENTRY;
+	en_16;
+	eof_17;
+	eof_18;
+	node [ shape = circle, height = 0.2 ];
+	node [ fixedsize = true, height = 0.65, shape = doublecircle ];
+	16;
+	17;
+	18;
+	node [ shape = circle ];
+	1 -> 2 [ label = "82" ];
+	2 -> 3 [ label = "69" ];
+	3 -> 4 [ label = "81" ];
+	3 -> 12 [ label = "83" ];
+	4 -> 5 [ label = "0 / mark" ];
+	5 -> 6 [ label = "0" ];
+	6 -> 7 [ label = "0" ];
+	7 -> 8 [ label = "1..4, 7, 9, 12..16, 18, 21..26, 28..30, 32..36" ];
+	8 -> 9 [ label = "0..255 / magic, mark" ];
+	9 -> 10 [ label = "0..255" ];
+	10 -> 11 [ label = "0..255" ];
+	11 -> 17 [ label = "0..255" ];
+	12 -> 13 [ label = "0 / mark" ];
+	13 -> 14 [ label = "0" ];
+	14 -> 15 [ label = "0" ];
+	15 -> 8 [ label = "6, 8, 10..14, 17, 19..20, 25, 27..29, 31" ];
+	16 -> 1 [ label = "0 / ts" ];
+	17 -> 18 [ label = "DEF / size, mark" ];
+	18 -> 18 [ label = "DEF" ];
+	ENTRY -> 16 [ label = "IN" ];
+	en_16 -> 16 [ label = "main" ];
+	17 -> eof_17 [ label = "EOF / size, mark, data, next1" ];
+	18 -> eof_18 [ label = "EOF / data, next1" ];
+}

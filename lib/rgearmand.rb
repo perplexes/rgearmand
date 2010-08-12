@@ -3,14 +3,17 @@ require 'eventmachine'
 require 'ruby-debug'
 Debugger.start
 
-TYPE_TABLE = DATA.read.each_line.inject({}) do |h, l|
+TYPE_TABLE = {}
+NUM_TABLE = {}
+
+TYPE_TABLE = DATA.read.each_line do |l|
   next h if l =~ /#/
   num, name, magic, type = l.split
-  h[[magic, num.to_i]] = name
-  h
+  TYPE_TABLE[[magic, num.to_i]] = name
+  NUM_TABLE[[magic, name]] = num.to_i
 end
-INV_TYPE = TYPE_TABLE.invert
 
+# TODO: Need a round-robin queue for workers.
 module Rgearmand
   def initialize
     puts "RGearmanD up"
@@ -18,11 +21,11 @@ module Rgearmand
   end
   
   def post_init
-    puts "-- someone connected to the echo server!"
+    puts "-- someone connected to regearmand!"
   end
   
   def unbind
-    puts "-- someone disconnected from the echo server!"
+    puts "-- someone disconnected from regearmand!"
   end
 
   def receive_data(data)
@@ -37,7 +40,8 @@ module Rgearmand
   end
   
   def respond(name, *args)
-    magic, num = INV_TYPE[name]
+    magic = 'RES'
+    num = NUM_TABLE[[magic,name.to_s.upcase]]
     arg = args.join("\0")
     data = [
       "\0",
@@ -50,8 +54,8 @@ module Rgearmand
   end
   
   def submit_job(func_name, uniq, data)
-    respond "JOB_CREATED", "H:lap:1"
-    respond "WORK_COMPLETE", "H:lap:1", data.reverse
+    respond :job_created, "H:lap:1"
+    respond :work_complete, "H:lap:1", data.reverse
   end
 end
 
@@ -73,11 +77,11 @@ __END__
 10  NO_JOB              RES    Worker
 11  JOB_ASSIGN          RES    Worker
 12  WORK_STATUS         REQ    Worker
-                        RES    Client
+12  WORK_STATUS         RES    Client
 13  WORK_COMPLETE       REQ    Worker
-                        RES    Client
+13  WORK_COMPLETE       RES    Client
 14  WORK_FAIL           REQ    Worker
-                        RES    Client
+14  WORK_FAIL           RES    Client
 15  GET_STATUS          REQ    Client
 16  ECHO_REQ            REQ    Client/Worker
 17  ECHO_RES            RES    Client/Worker
@@ -89,13 +93,13 @@ __END__
 23  CAN_DO_TIMEOUT      REQ    Worker
 24  ALL_YOURS           REQ    Worker
 25  WORK_EXCEPTION      REQ    Worker
-                        RES    Client
+25  WORK_EXCEPTION      RES    Client
 26  OPTION_REQ          REQ    Client/Worker
 27  OPTION_RES          RES    Client/Worker
 28  WORK_DATA           REQ    Worker
-                        RES    Client
+28  WORK_DATA           RES    Client
 29  WORK_WARNING        REQ    Worker
-                        RES    Client
+29  WORK_WARNING        RES    Client
 30  GRAB_JOB_UNIQ       REQ    Worker
 31  JOB_ASSIGN_UNIQ     RES    Worker
 32  SUBMIT_JOB_HIGH_BG  REQ    Client
