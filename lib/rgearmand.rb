@@ -3,22 +3,18 @@ require 'eventmachine'
 require 'ruby-debug'
 Debugger.start
 
-TYPE_TABLE = {}
-NUM_TABLE = {}
-
-TYPE_TABLE = DATA.read.each_line do |l|
-  next h if l =~ /#/
-  num, name, magic, type = l.split
-  TYPE_TABLE[[magic, num.to_i]] = name
-  NUM_TABLE[[magic, name]] = num.to_i
-end
+$: << File.dirname(__FILE__)
+require 'protocol'
 
 # TODO: Need a round-robin queue for workers.
 module Rgearmand
   def initialize
     puts "RGearmanD up"
+    @workers = {}
     super
   end
+  
+  # Overrides for connections
   
   def post_init
     puts "-- someone connected to regearmand!"
@@ -30,27 +26,18 @@ module Rgearmand
 
   def receive_data(data)
     puts "receive <<< #{data.inspect}"
-    magic = data[1..3]
-    num, len = data[4..11].unpack("NN")
-    name = TYPE_TABLE[[magic, num]]
-    arguments = data[12..-1].split("\0")
-    puts "#{magic}, #{num}, #{len}, #{name}, #{arguments.inspect}"
+    packet = Protocol.parse(data)
+    puts "#{packet[:type]}, #{packet[:size]}, #{packet[:arguments].inspect}"
     
-    self.send(name.downcase, *arguments)
+    self.send(packet[:type], *packet[:arguments])
   end
   
-  def respond(name, *args)
-    magic = 'RES'
-    num = NUM_TABLE[[magic,name.to_s.upcase]]
-    arg = args.join("\0")
-    data = [
-      "\0",
-      magic,
-      [num, arg.size].pack('NN'),
-      arg
-    ].join
-    puts "response >>> #{data.inspect}"
-    send_data(data)
+  # Our code
+  
+  def respond(type, *args)
+    packet = Protocol.generate(type, "RES", *args)
+    puts "response >>> #{packet.inspect}"
+    send_data(packet)
   end
   
   def submit_job(func_name, uniq, data)

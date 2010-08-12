@@ -50,3 +50,7 @@ Rake::RDocTask.new do |rdoc|
   rdoc.rdoc_files.include('README*')
   rdoc.rdoc_files.include('lib/**/*.rb')
 end
+
+task :ragel do
+  `ragel -R -s lib/protocol.rl`
+end
