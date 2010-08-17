@@ -6,11 +6,61 @@ Debugger.start
 $: << File.dirname(__FILE__)
 require 'protocol'
 
+COMMANDS = {
+  1  => :can_do,               # W->J: FUNC
+  2  => :cant_do,              # W->J: FUNC
+  3  => :reset_abilities,      # W->J: --
+  4  => :pre_sleep,            # W->J: --
+  #5 =>  (unused),             # -      -
+  6  => :noop,                 # J->W: --
+  7  => :submit_job,           # C->J: FUNC[0]UNIQ[0]ARGS
+  8  => :job_created,          # J->C: HANDLE
+  9  => :grab_job,             # W->J: --
+  10 => :no_job,               # J->W: --
+  11 => :job_assign,           # J->W: HANDLE[0]FUNC[0]ARG
+  12 => :work_status,          # W->J/C: HANDLE[0]NUMERATOR[0]DENOMINATOR
+  13 => :work_complete,        # W->J/C: HANDLE[0]RES
+  14 => :work_fail,            # W->J/C: HANDLE
+  15 => :get_status,           # C->J: HANDLE
+  16 => :echo_req,             # ?->J: TEXT
+  17 => :echo_res,             # J->?: TEXT
+  18 => :submit_job_bg,        # C->J: FUNC[0]UNIQ[0]ARGS
+  19 => :error,                # J->?: ERRCODE[0]ERR_TEXT
+  20 => :status_res,           # C->J: HANDLE[0]KNOWN[0]RUNNING[0]NUM[0]DENOM
+  21 => :submit_job_high,      # C->J: FUNC[0]UNIQ[0]ARGS
+  22 => :set_client_id,        # W->J: [RANDOM_STRING_NO_WHITESPACE]
+  23 => :can_do_timeout,       # W->J: FUNC[0]TIMEOUT
+  24 => :all_yours,            # REQ    Worker
+  25 => :work_exception,       # W->J: HANDLE[0]ARG
+  26 => :option_req,           # C->J: TEXT
+  27 => :option_res,           # J->C: TEXT
+  28 => :work_data,            # REQ    Worker
+  29 => :work_warning,         # W->J/C: HANDLE[0]MSG
+  30 => :grab_job_uniq,        # REQ    Worker
+  31 => :job_assign_uniq,      # RES    Worker
+  32 => :submit_job_high_bg,   # C->J: FUNC[0]UNIQ[0]ARGS
+  33 => :submit_job_low,       # C->J: FUNC[0]UNIQ[0]ARGS
+  34 => :submit_job_low_bg,    # C->J: FUNC[0]UNIQ[0]ARGS
+  35 => :submit_job_sched,     # REQ    Client
+  36 => :submit_job_epoch      # C->J: FUNC[0]UNIQ[0]EPOCH[0]ARGS
+}
+COMMAND_INV = COMMANDS.invert
+
+PRIORITIES = {
+  1 => :high, 
+  2 => :normal, 
+  3 => :low
+}
+
+QUEUES = {}
+WORKERS = {}
+
 # TODO: Need a round-robin queue for workers.
 module Rgearmand
+  
   def initialize
-    puts "RGearmanD up"
-    @workers = {}
+    puts "Connection from someone..."
+    @capabilities = []
     super
   end
   
@@ -25,29 +75,113 @@ module Rgearmand
   end
 
   def receive_data(data)
+    offset = 0
     puts "receive <<< #{data.inspect}"
-    packet = Protocol.parse(data)
-    puts "#{packet[:type]}, #{packet[:size]}, #{packet[:arguments].inspect}"
+    puts "length <<< #{data.length}"
     
-    self.send(packet[:type], *packet[:arguments])
+    while(offset < data.length)
+      #packet = Protocol.parse(data)
+      header = data[offset+0..offset+11]
+      type = header[1..3].to_s
+      cmd =  COMMANDS[header[4..7].unpack('N').first]
+      datalen = header[8..11].unpack('N').first
+      args = data[offset+12..offset+12+datalen].split("\0")
+    
+      offset = offset + datalen + 12
+      
+      puts "Type: #{type}"
+      puts "Cmd: #{cmd}"
+      puts "Datalen: #{datalen}"
+      puts "Data: #{args}"
+    
+      self.send(cmd, *args)
+    end
   end
   
   # Our code
+  def generate(name, *args)
+    puts "G: #{args}"
+    args = args.flatten
+    num = COMMAND_INV[name]
+    arg = args.join("\0")
+
+    data = [
+      "\0",
+      "RES",
+      [num, arg.size].pack('NN'),
+      arg
+    ].join
+  end
   
   def respond(type, *args)
-    packet = Protocol.generate(type, "RES", *args)
+    packet = generate(type, *args)
     puts "response >>> #{packet.inspect}"
     send_data(packet)
   end
   
+  
+  # commands
+  def pre_sleep
+  
+  end
+  
+  def submit_job_bg(func_name, uniq, data)
+
+    unless QUEUES.has_key?(func_name) 
+      QUEUES[func_name] = { :normal => [], :high => [], :low => [] }
+    end
+     
+    QUEUES[func_name][:normal] << {:uniq => uniq, :data => data}
+  end
+
+  def grab_job
+    @capabilities.each do |capability|
+      [:high, :normal, :low].each do |priority|
+        next unless QUEUES.has_key?(capability)
+        jobqueue = QUEUES[capability][priority]
+        puts jobqueue.inspect
+        if (jobqueue.length > 0) 
+          job = jobqueue.shift
+          puts job.inspect
+          respond :job_assign, "H:job:1", job[:data]
+          return
+        end
+      end
+    end
+    puts "No job!"
+    respond :no_job
+  end
+  
+  def can_do(func_name)
+    unless WORKERS.has_key?(func_name) 
+      WORKERS[func_name] = []
+    end
+    
+    unless @capabilities.include?(func_name)
+      @capabilities << func_name
+    end
+    
+    WORKERS[func_name] << self
+    
+    puts WORKERS.inspect
+  end
+  
+  def set_client_id(worker_id = nil)
+    if worker_id == nil
+      worker_id = rand(36**8).to_s()
+    end
+    @worker_id = worker_id 
+  end
+  
   def submit_job(func_name, uniq, data)
+    puts "SJ: #{uniq} -- #{data}"
     respond :job_created, "H:lap:1"
     respond :work_complete, "H:lap:1", data.reverse
   end
 end
 
 EventMachine::run {
-  EventMachine::start_server "127.0.0.1", 4730, Rgearmand
+  EventMachine::start_server "127.0.0.1", 4731, Rgearmand
 }
 
 __END__

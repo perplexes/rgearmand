@@ -4,61 +4,105 @@
   machine gearman;
   alphtype int;
   
-  action mark { start = p }
+  action headmark { 
+    puts "headmark: #{p}"
+    puts "D: #{data[p-1]}"
+    puts data
+    start = p 
+  }
 
+  action magicmark { 
+    puts "magicmark: #{p}"
+    puts "D: #{data[p]} #{data[p+1]} #{data[p+2]} #{data[p+3]}"
+    puts data
+    start = p 
+  }
+  
+  action sizemark { 
+    puts "sizemark: #{p}"
+    start = p 
+  }
+
+  action datamark { 
+    puts "datamark: #{p}"
+    start = p 
+  }
+  
   action magic {
+    puts "Packet #: #{packetnum}"
+    packets << {}
     magic = data[start..p-1].unpack('N').first
-    packet[:magic] = COMMANDS[magic]
+    packets[packetnum][:magic] = COMMANDS[magic]
   }
   
   action size {
+    puts "Size: #{p}"
     size = data[start..p-1].unpack('N').first
-    packet[:size] = size
+    packets[packetnum][:size] = size
   }
   
   action data {
-    data_end = start + packet[:size]
-    packet[:data] = data[start..data_end]
-    if packet[:size] != (packet[:data] && packet[:data].size)
-      packet[:error] = "Size is invalid. Expected #{packet[:size]} bytes, but have #{packet[:data].size}."
+    puts "num: #{packetnum}"
+    pkt = packets[packetnum]
+    pkt ||= {}
+    
+    puts "P: #{pkt.inspect}"
+    puts "S: #{start} -- #{packets[packetnum][:size]}"
+    data_end = start + (packets[packetnum][:size] - 1)
+    packets[packetnum][:data] = data[start..data_end]
+    if packets[packetnum][:size] != (packets[packetnum][:data] && packets[packetnum][:data].size)
+      packets[packetnum][:error] = "Size is invalid. Expected #{packets[packetnum][:size]} bytes, but have #{packets[packetnum][:data].size}."
     else
-      packet[:arguments] = packet[:data].split("\0")
+      packets[packetnum][:arguments] = packets[packetnum][:data].split("\0")
     end
+
+    puts "P: #{pkt.inspect}"
+    puts "S: #{start}"
+    p = data_end + 1
+    puts "Ptr: #{p}"
+    packetnum += 1
   }
   
   action packet_error {
-    packet[:packet_valid] = false
+    packets[packetnum] ||= {}
+    packets[packetnum][:packet_valid] = false
   }
   
   action size_error {
     if p == 8
-      packet[:error] = "Size header not found."
+      packets[packetnum][:error] = "Size header not found."
     else
-      packet[:error] = "Size invalid: #{data[start..p-1].inspect}"
+      packets[packetnum][:error] = "Size invalid: #{data[start..p-1].inspect}"
     end
   }
   
   action magic_error {
-    packet[:error] = "Magic header invalid: #{data[start..p-1].inspect}."
+    puts "NARFLE"
+    packets[packetnum][:error] = "Magic header invalid: #{data[start..p-1].inspect}."
   }
   
   size        = (0..255){4};
-  size_cap    = size >mark %size @err(size_error);
-  data        = any*;
-  data_cap    = data >mark %data;
-  req_head    = 0 'REQ';
-  res_head    = 0 'RES';
-  req_magic   = 0{3} (1|2|3|4|7|9|12|13|14|15|16|18|21|22|23|24|25|26|28|29|30|32|33|34|35|36);
-  res_magic   = 0{3} (6|8|10|11|12|13|14|17|19|20|25|27|28|29|31);
-  req_magic_cap = req_magic >mark %magic @err(magic_error);
-  res_magic_cap = res_magic >mark %magic @err(magic_error);
-  req_packet  = req_head req_magic_cap size_cap data_cap;
-  res_packet  = res_head res_magic_cap size_cap data_cap;
-  packet      = (req_packet | res_packet) @err(packet_error);
-  
-  main := |*
-    packet => {};
-  *|;
+  size_cap    = size >sizemark %size @err(size_error);
+ 
+  req_head    = 0 . 'REQ';
+  req_head_cap = req_head >headmark;
+  res_head    = (0 . 'RES');
+
+ 
+  req_magic   = (0{3} . (1|2|3|4|7|9|12|13|14|15|16|18|21|22|23|24|25|26|28|29|30|32|33|34|35|36));
+  res_magic   = (0{3} . (6|8|10|11|12|13|14|17|19|20|25|27|28|29|31));
+  req_magic_cap = req_magic >magicmark %magic @err(magic_error);
+  res_magic_cap = res_magic >magicmark %magic @err(magic_error);
+
+  data        = (any*  - (req_head | res_head));
+  data_cap    = (data >datamark %data);
+ 
+  req_packet  = (req_head_cap . req_magic_cap . size_cap . data_cap);
+  res_packet  = (res_head . res_magic_cap . size_cap . data_cap);
+  packet      = (req_packet | res_packet);
+  packets     = packet+;
+
+  main := packets;
 
 }%%
 =end
@@ -110,12 +154,13 @@ module Rgearmand
   
   def parse(data)
     eof = data.length
-    packet = {}
-
+    packetnum = 0
+    #packet = {}
+    packets = []
     %% write init;
     %% write exec;
 
-    packet
+    packets
   end
   module_function :parse
   
@@ -134,4 +179,5 @@ end
 
 def test
   Rgearmand.parse("\000REQ\000\000\000\020\0\0\0\005hello")
+  Rgearmand.parse("\000REQ\000\000\000\020\0\0\0\005hello\000REQ\000\000\000\020\0\0\0\005hello")
 end
