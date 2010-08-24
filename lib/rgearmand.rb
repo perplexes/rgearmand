@@ -5,6 +5,7 @@ Debugger.start
 
 $: << File.dirname(__FILE__)
 require 'protocol'
+require 'job'
 
 COMMANDS = {
   1  => :can_do,               # W->J: FUNC
@@ -54,6 +55,9 @@ PRIORITIES = {
 
 QUEUES = {}
 WORKERS = {}
+STATE = {}
+JOBS = {}
+CLIENTS = {}
 
 # TODO: Need a round-robin queue for workers.
 module Rgearmand
@@ -61,6 +65,7 @@ module Rgearmand
   def initialize
     puts "Connection from someone..."
     @capabilities = []
+    @currentjob = nil
     super
   end
   
@@ -119,6 +124,13 @@ module Rgearmand
     send_data(packet)
   end
   
+  def get_job_handle
+    STATE[:job_handle_id] ||= 0
+    STATE[:job_handle_id] += 1
+    STATE[:job_handle_id]
+    "H:foo.narf:#{STATE[:job_handle_id]}"
+  end
+  
   
   # commands
   def pre_sleep
@@ -127,11 +139,13 @@ module Rgearmand
   
   def submit_job_bg(func_name, uniq, data)
 
+    job_handle = get_job_handle
+  
     unless QUEUES.has_key?(func_name) 
       QUEUES[func_name] = { :normal => [], :high => [], :low => [] }
     end
      
-    QUEUES[func_name][:normal] << {:uniq => uniq, :data => data}
+    QUEUES[func_name][:normal] << {:uniq => uniq, :job_handle => "#{job_handle}", :data => data}
   end
 
   def grab_job
@@ -143,7 +157,9 @@ module Rgearmand
         if (jobqueue.length > 0) 
           job = jobqueue.shift
           puts job.inspect
-          respond :job_assign, "H:job:1", job[:data]
+          @current_job = job
+          puts "Found job: #{job.inspect}"
+          respond :job_assign, job[:job_handle], capability, job[:data]
           return
         end
       end
@@ -163,6 +179,8 @@ module Rgearmand
     
     WORKERS[func_name] << self
     
+    puts "Workers"
+    puts "-------"
     puts WORKERS.inspect
   end
   
@@ -173,10 +191,40 @@ module Rgearmand
     @worker_id = worker_id 
   end
   
+  def work_fail
+    
+  end
+  
+  def work_complete(job_handle, data)
+    packet = generate(:work_complete, [job_handle, data])
+    
+    CLIENTS[job_handle].send_data(packet)
+    CLIENTS.delete(job_handle)
+  end
+  
   def submit_job(func_name, uniq, data)
-    puts "SJ: #{uniq} -- #{data}"
-    respond :job_created, "H:lap:1"
-    respond :work_complete, "H:lap:1", data.reverse
+    job_handle = get_job_handle
+    
+    unless QUEUES.has_key?(func_name) 
+      QUEUES[func_name] = { :normal => [], :high => [], :low => [] }
+    end
+    
+    QUEUES[func_name][:normal] << {:uniq => uniq, :job_handle => "#{job_handle}", :data => data}
+    
+    CLIENTS[job_handle] = self 
+    respond :job_created, job_handle
+    
+    puts "QUEUE: #{QUEUES[func_name][:normal].inspect}"
+    
+    WORKERS.has_key?(func_name) && WORKERS[func_name].each do |w|
+      puts "Sending NOOP to #{w}"
+      packet = generate :noop
+      w.send_data(packet)
+    end
+    
+    #puts "SJ: #{uniq} -- #{data}"
+    #respond :job_created, "H:lap:1"
+    #respond :work_complete, "H:lap:1", data.reverse
   end
 end
 
