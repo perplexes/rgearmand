@@ -8,6 +8,7 @@ require 'protocol'
 require 'redis'
 require 'json'
 require 'andand'
+require 'ruby-prof'
 
 COMMANDS = {
   1  => :can_do,               # W->J: FUNC
@@ -64,10 +65,9 @@ CLIENTS = {}
 NEIGHBORS = {}
 HOSTNAME = ARGV[0]
 
-puts "#{HOSTNAME} starting up..."
-
-
-
+# Signals
+Signal.trap('INT') { EM.stop }
+Signal.trap('TERM'){ EM.stop }
 
 # TODO: Need a round-robin queue for workers.
 module Rgearmand
@@ -237,11 +237,11 @@ module Rgearmand
     key = "#{HOSTNAME}-#{uniq}"
     puts "Checking for #{key} in persistent queue"
     if PQUEUE.sismember(HOSTNAME, key)
-      puts "Removing job from persistent queue"
-      if PQUEUE.exists key 
+      if !PQUEUE.exists key 
+        puts "Removing job from persistent queue"
         PQUEUE.del key
       end
-      PQUEUE.srem HOSTNAME, uniq
+      PQUEUE.srem HOSTNAME, key
     end
   end
   
@@ -271,16 +271,28 @@ class GearmanServer
   def initialize 
     # LOAD
     # Read jobs from the persistent queue
-    PQUEUE.smembers(HOSTNAME).andand.each do |unique|
-      puts "Found key: #{unique}"
-      jdata = PQUEUE.get("#{unique}")
-      job = JSON.parse(jdata)
-      puts "Job: #{job}"
-      if job[:uniq].nil?
-        job[:uniq] = unique.split("-")[1]
+    PQUEUE.smembers(HOSTNAME).andand.each do |key|
+      puts "Found key: #{key}"
+      if PQUEUE.exists key
+        jdata = PQUEUE.get("#{key}")
+        puts "Found data: #{jdata}"
+        if jdata.nil?
+          puts "Empty data, removing key... "
+          result = PQUEUE.del key
+          puts "Deleted #{result} keys"
+        else 
+          job = JSON.parse(jdata)
+          puts "Job: #{job}"
+          if job[:uniq].nil?
+            job[:uniq] = key.split("-")[1]
+          end
+          job_handle = self.enqueue job
+          puts "Enqueued with handle #{job_handle}"
+        end
+      else
+        puts "Empty job, removing key."
+        PQUEUE.srem HOSTNAME, key
       end
-      job_handle = self.enqueue job
-      puts "Enqueued with handle #{job_handle}"
     end
 
     EventMachine::run {
@@ -289,8 +301,15 @@ class GearmanServer
   end
 end
 
-gm = GearmanServer.new()
 
+
+puts "#{HOSTNAME} starting up..."
+RubyProf.start
+gm = GearmanServer.new()
+result = RubyProf.stop
+# Print a flat profile to text
+printer = RubyProf::FlatPrinter.new(result)
+printer.print(STDOUT, 0)
 
 __END__
 #   Name                Magic  Type
