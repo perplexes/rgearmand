@@ -5,7 +5,9 @@ Debugger.start
 
 $: << File.dirname(__FILE__)
 require 'protocol'
-require 'job'
+require 'redis'
+require 'json'
+require 'andand'
 
 COMMANDS = {
   1  => :can_do,               # W->J: FUNC
@@ -53,11 +55,19 @@ PRIORITIES = {
   3 => :low
 }
 
+PQUEUE = Redis.new(:host => "127.0.0.1", :port => 6379)
 QUEUES = {}
 WORKERS = {}
 STATE = {}
 JOBS = {}
 CLIENTS = {}
+NEIGHBORS = {}
+HOSTNAME = ARGV[0]
+
+puts "#{HOSTNAME} starting up..."
+
+
+
 
 # TODO: Need a round-robin queue for workers.
 module Rgearmand
@@ -66,6 +76,7 @@ module Rgearmand
     puts "Connection from someone..."
     @capabilities = []
     @currentjob = nil
+
     super
   end
   
@@ -104,6 +115,35 @@ module Rgearmand
   end
   
   # Our code
+  def get_job_handle
+    STATE[:job_handle_id] ||= 0
+    STATE[:job_handle_id] += 1
+    STATE[:job_handle_id]
+    "H:foo.narf:#{STATE[:job_handle_id]}"
+  end
+  
+  def enqueue(opts = {})
+    func_name = opts[:func_name] || opts["func_name"]
+    priority = opts[:priority] || opts["priority"] || :normal
+    uniq = opts[:uniq] || opts["uniq"] 
+    job_handle = get_job_handle
+    data = opts[:data] || opts["data"] 
+    
+    unless QUEUES.has_key?(func_name) 
+      QUEUES[func_name] = { :normal => [], :high => [], :low => [] }
+    end
+     
+    QUEUES[func_name][priority] << {:uniq => uniq, :job_handle => "#{job_handle}", :data => data}
+    
+    if opts[:persist]
+      key = "#{HOSTNAME}-#{uniq}"
+      PQUEUE.set key, JSON.dump({:func_name => func_name, :data => data})
+      PQUEUE.sadd HOSTNAME, key
+    end
+    
+    job_handle
+  end
+  
   def generate(name, *args)
     puts "G: #{args}"
     args = args.flatten
@@ -124,31 +164,17 @@ module Rgearmand
     send_data(packet)
   end
   
-  def get_job_handle
-    STATE[:job_handle_id] ||= 0
-    STATE[:job_handle_id] += 1
-    STATE[:job_handle_id]
-    "H:foo.narf:#{STATE[:job_handle_id]}"
-  end
-  
-  
   # commands
   def pre_sleep
   
   end
   
   def submit_job_bg(func_name, uniq, data)
-
-    job_handle = get_job_handle
-  
-    unless QUEUES.has_key?(func_name) 
-      QUEUES[func_name] = { :normal => [], :high => [], :low => [] }
-    end
-     
-    QUEUES[func_name][:normal] << {:uniq => uniq, :job_handle => "#{job_handle}", :data => data}
+    job_handle = enqueue(:func_name => func_name, :uniq => uniq, :data => data, :persist => true)
   end
 
   def grab_job
+    puts "QUEUES: #{QUEUES.inspect}"
     @capabilities.each do |capability|
       [:high, :normal, :low].each do |priority|
         next unless QUEUES.has_key?(capability)
@@ -198,18 +224,13 @@ module Rgearmand
   def work_complete(job_handle, data)
     packet = generate(:work_complete, [job_handle, data])
     
-    CLIENTS[job_handle].send_data(packet)
+    CLIENTS[job_handle].andand.send_data(packet)
     CLIENTS.delete(job_handle)
   end
   
   def submit_job(func_name, uniq, data)
-    job_handle = get_job_handle
-    
-    unless QUEUES.has_key?(func_name) 
-      QUEUES[func_name] = { :normal => [], :high => [], :low => [] }
-    end
-    
-    QUEUES[func_name][:normal] << {:uniq => uniq, :job_handle => "#{job_handle}", :data => data}
+    job_handle = enqueue(:func_name => func_name, :uniq => uniq, :data => data, :persist => true)
+   
     
     CLIENTS[job_handle] = self 
     respond :job_created, job_handle
@@ -226,11 +247,32 @@ module Rgearmand
     #respond :job_created, "H:lap:1"
     #respond :work_complete, "H:lap:1", data.reverse
   end
+  
+end
+class GearmanServer
+  include Rgearmand
+
+  def initialize 
+    # LOAD
+    # Read jobs from the persistent queue
+    PQUEUE.smembers(HOSTNAME).andand.each do |unique|
+      puts "Found key: #{unique}"
+      jdata = PQUEUE.get("#{unique}")
+      job = JSON.parse(jdata)
+      puts "Job: #{job}"
+
+      job_handle = self.enqueue job
+      puts "Enqueued with handle #{job_handle}"
+    end
+
+    EventMachine::run {
+      EventMachine::start_server "127.0.0.1", 4731, Rgearmand
+    }
+  end
 end
 
-EventMachine::run {
-  EventMachine::start_server "127.0.0.1", 4731, Rgearmand
-}
+gm = GearmanServer.new()
+
 
 __END__
 #   Name                Magic  Type
