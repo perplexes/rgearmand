@@ -137,7 +137,7 @@ module Rgearmand
     
     if opts[:persist]
       key = "#{HOSTNAME}-#{uniq}"
-      PQUEUE.set key, JSON.dump({:func_name => func_name, :data => data})
+      PQUEUE.set key, JSON.dump({:func_name => func_name, :data => data, :uniq => uniq})
       PQUEUE.sadd HOSTNAME, key
     end
     
@@ -183,8 +183,13 @@ module Rgearmand
         if (jobqueue.length > 0) 
           job = jobqueue.shift
           puts job.inspect
-          @current_job = job
           puts "Found job: #{job.inspect}"
+
+          if !JOBS.has_key? job[:job_handle]
+            puts "Adding to run queue..."
+            JOBS[job[:job_handle]] = job
+          end
+
           respond :job_assign, job[:job_handle], capability, job[:data]
           return
         end
@@ -223,16 +228,27 @@ module Rgearmand
   
   def work_complete(job_handle, data)
     packet = generate(:work_complete, [job_handle, data])
+    uniq = JOBS[job_handle][:uniq]
+    client = JOBS[job_handle][:client]
+    client.andand.send_data(packet)
+
+    JOBS.delete(job_handle)
     
-    CLIENTS[job_handle].andand.send_data(packet)
-    CLIENTS.delete(job_handle)
+    key = "#{HOSTNAME}-#{uniq}"
+    puts "Checking for #{key} in persistent queue"
+    if PQUEUE.sismember(HOSTNAME, key)
+      puts "Removing job from persistent queue"
+      if PQUEUE.exists key 
+        PQUEUE.del key
+      end
+      PQUEUE.srem HOSTNAME, uniq
+    end
   end
   
   def submit_job(func_name, uniq, data)
     job_handle = enqueue(:func_name => func_name, :uniq => uniq, :data => data, :persist => true)
    
-    
-    CLIENTS[job_handle] = self 
+    JOBS[job_handle] = {:client => self , :uniq => uniq}
     respond :job_created, job_handle
     
     puts "QUEUE: #{QUEUES[func_name][:normal].inspect}"
@@ -260,7 +276,9 @@ class GearmanServer
       jdata = PQUEUE.get("#{unique}")
       job = JSON.parse(jdata)
       puts "Job: #{job}"
-
+      if job[:uniq].nil?
+        job[:uniq] = unique.split("-")[1]
+      end
       job_handle = self.enqueue job
       puts "Enqueued with handle #{job_handle}"
     end
