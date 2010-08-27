@@ -1,0 +1,21 @@
+%h2 #{@function_name} &mdash; #{@priority}
+
+%table{:class => "joblist"}
+  %thead
+    %colgroup
+      %col{:width => '100px'}
+      %col{:width => '200px'}
+      %col{:width => ''}
+    %tr
+      %th ID
+      %th Queue time
+      %th Data preview
+  %tbody
+  - @jobs.each do |j|
+    %tr 
+      %td
+        %a{:title => "#{j[:uniq]}", :href => "/jobs/show/#{j[:uniq]}"} #{j[:uniq][0,10]}...
+      %td
+        #{Time.at(j[:timestamp]).strftime("%B %d %Y %H:%M:%S %p")} 
+      %td
+        #{j[:data][0,50]}

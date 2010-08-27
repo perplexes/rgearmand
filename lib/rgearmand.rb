@@ -1,14 +1,27 @@
 require 'rubygems'
 require 'eventmachine'
 require 'ruby-debug'
-Debugger.start
-
-$: << File.dirname(__FILE__)
-require 'protocol'
+require 'logger'
 require 'redis'
 require 'json'
 require 'andand'
 require 'ruby-prof'
+require 'algorithms'
+
+class Containers::Heap
+  def stored
+    @stored
+  end
+end
+
+class Containers::PriorityQueue
+  def to_a
+    @heap.stored.collect{ |element|  {:key => element[0], :value => element[1][0].value}  }
+  end
+end
+
+$: << File.dirname(__FILE__)
+Debugger.start
 
 COMMANDS = {
   1  => :can_do,               # W->J: FUNC
@@ -65,6 +78,15 @@ CLIENTS = {}
 NEIGHBORS = {}
 HOSTNAME = ARGV[0]
 
+def logger
+  @logger ||= if ENV['LOG_TO_STDOUT']
+    Logger.new(STDOUT)
+  else
+    Logger.new("rgearmand.log", File::WRONLY | File::APPEND)
+  end
+end
+
+
 # Signals
 Signal.trap('INT') { EM.stop }
 Signal.trap('TERM'){ EM.stop }
@@ -73,7 +95,7 @@ Signal.trap('TERM'){ EM.stop }
 module Rgearmand
   
   def initialize
-    puts "Connection from someone..."
+    logger.info "Connection from someone..."
     @capabilities = []
     @currentjob = nil
 
@@ -83,17 +105,17 @@ module Rgearmand
   # Overrides for connections
   
   def post_init
-    puts "-- someone connected to regearmand!"
+    logger.debug "-- someone connected to regearmand!"
   end
   
   def unbind
-    puts "-- someone disconnected from regearmand!"
+    logger.debug "-- someone disconnected from regearmand!"
   end
 
   def receive_data(data)
     offset = 0
-    puts "receive <<< #{data.inspect}"
-    puts "length <<< #{data.length}"
+    logger.debug "receive <<< #{data.inspect}"
+    logger.debug "length <<< #{data.length}"
     
     while(offset < data.length)
       #packet = Protocol.parse(data)
@@ -105,10 +127,10 @@ module Rgearmand
     
       offset = offset + datalen + 12
       
-      puts "Type: #{type}"
-      puts "Cmd: #{cmd}"
-      puts "Datalen: #{datalen}"
-      puts "Data: #{args}"
+      logger.debug "Type: #{type}"
+      logger.debug "Cmd: #{cmd}"
+      logger.debug "Datalen: #{datalen}"
+      logger.debug "Data: #{args}"
     
       self.send(cmd, *args)
     end
@@ -128,24 +150,45 @@ module Rgearmand
     uniq = opts[:uniq] || opts["uniq"] 
     job_handle = get_job_handle
     data = opts[:data] || opts["data"] 
+    timestamp = opts[:timestamp] || opts["timestamp"] || 0
     
     unless QUEUES.has_key?(func_name) 
-      QUEUES[func_name] = { :normal => [], :high => [], :low => [] }
+      QUEUES[func_name] = { 
+        :normal => Containers::PriorityQueue.new() { |y, x| (x <=> y) == 1 }, 
+        :high => Containers::PriorityQueue.new() { |y, x| (x <=> y) == 1 }, 
+        :low => Containers::PriorityQueue.new() { |y, x| (x <=> y) == 1 } 
+      }
     end
-     
-    QUEUES[func_name][priority] << {:uniq => uniq, :job_handle => "#{job_handle}", :data => data}
+    
+    logger.debug "Timestamp: #{timestamp} -> #{timestamp.to_i}"
+    QUEUES[func_name][priority].push({:uniq => uniq, :job_handle => "#{job_handle}", :data => data, :timestamp => timestamp.to_i}, timestamp.to_i)
     
     if opts[:persist]
       key = "#{HOSTNAME}-#{uniq}"
-      PQUEUE.set key, JSON.dump({:func_name => func_name, :data => data, :uniq => uniq})
+      PQUEUE.set key, JSON.dump({:func_name => func_name, :data => data, :uniq => uniq, :timestamp => timestamp})
       PQUEUE.sadd HOSTNAME, key
     end
     
     job_handle
   end
   
+  def dequeue(job_handle)
+    uniq = JOBS[job_handle][:uniq]
+    JOBS.delete(job_handle)
+    
+    key = "#{HOSTNAME}-#{uniq}"
+    logger.debug "Checking for #{key} in persistent queue"
+    if PQUEUE.sismember(HOSTNAME, key)
+      if !PQUEUE.exists key 
+        logger.debug "Removing job from persistent queue"
+        PQUEUE.del key
+      end
+      PQUEUE.srem HOSTNAME, key
+    end
+  end
+
   def generate(name, *args)
-    puts "G: #{args}"
+    logger.debug "G: #{args}"
     args = args.flatten
     num = COMMAND_INV[name]
     arg = args.join("\0")
@@ -160,43 +203,88 @@ module Rgearmand
   
   def respond(type, *args)
     packet = generate(type, *args)
-    puts "response >>> #{packet.inspect}"
+    logger.debug "response >>> #{packet.inspect}"
     send_data(packet)
   end
   
-  # commands
-  def pre_sleep
-  
-  end
-  
+  # Client commands
   def submit_job_bg(func_name, uniq, data)
     job_handle = enqueue(:func_name => func_name, :uniq => uniq, :data => data, :persist => true)
+    respond :job_created, job_handle
+  end
+  
+  def submit_job(func_name, uniq, data)
+    job_handle = enqueue(:func_name => func_name, :uniq => uniq, :data => data, :persist => true)
+   
+    JOBS[job_handle] = {:client => self , :uniq => uniq}
+    respond :job_created, job_handle
+        
+    WORKERS.has_key?(func_name) && WORKERS[func_name].each do |w|
+      logger.debug "Sending NOOP to #{w}"
+      packet = generate :noop
+      w.send_data(packet)
+    end
+  end
+  
+  def submit_job_epoch(func_name, uniq, epoch, data)
+    logger.debug "Epoch job submission"
+    job_handle = enqueue(:func_name => func_name, :uniq => uniq, :data => data, :timestamp => epoch, :persist => true)
+    respond :job_created, job_handle
   end
 
-  def grab_job
-    puts "QUEUES: #{QUEUES.inspect}"
+  def get_status(job_handle)
+    unless JOBS[job_handle][:numerator].nil?
+      # We have status, so send it off
+      numerator = JOBS[job_handle][:numerator]
+      denominator = JOBS[job_handle][:denominator]
+      packet = generate :status_res, job_handle, 1, 0, numerator, denominator 
+    else
+      # We don't have a status for this packet
+      packet = generate :status_res, job_handle, 0, 0, 0, 0
+    end
+  end
+  
+  def grab_job(unique = false)
     @capabilities.each do |capability|
       [:high, :normal, :low].each do |priority|
         next unless QUEUES.has_key?(capability)
         jobqueue = QUEUES[capability][priority]
-        puts jobqueue.inspect
-        if (jobqueue.length > 0) 
-          job = jobqueue.shift
-          puts job.inspect
-          puts "Found job: #{job.inspect}"
+        #logger.debug jobqueue.inspect
+        if (jobqueue.size > 0) 
+          job = jobqueue.next
+          
+          if job[:timestamp] == 0 || job[:timestamp] <= Time.now().to_i
+            jobqueue.pop
+            logger.debug job.inspect
+            logger.debug "Found job: #{job.inspect}"
 
-          if !JOBS.has_key? job[:job_handle]
-            puts "Adding to run queue..."
-            JOBS[job[:job_handle]] = job
+            if !JOBS.has_key? job[:job_handle]
+              logger.debug "Adding to run queue..."
+              JOBS[job[:job_handle]] = job
+            end
+
+            if unique
+              respond :job_assign_uniq, job[:job_handle], capability, job[:uniq], job[:data]
+            else 
+              respond :job_assign, job[:job_handle], capability, job[:data]
+            end
+          
+            return
+          else 
+            logger.debug "No jobs ready to run"
           end
-
-          respond :job_assign, job[:job_handle], capability, job[:data]
-          return
         end
       end
     end
-    puts "No job!"
+    
+    logger.debug "No job!"
     respond :no_job
+  end
+  
+  
+  # Worker commands
+  def pre_sleep
+  
   end
   
   def can_do(func_name)
@@ -210,9 +298,21 @@ module Rgearmand
     
     WORKERS[func_name] << self
     
-    puts "Workers"
-    puts "-------"
-    puts WORKERS.inspect
+    logger.debug "Workers"
+    logger.debug "-------"
+    logger.debug WORKERS.inspect
+  end
+  
+  def cant_do(func_name)
+    logger.debug "Unregistering #{func_name}"
+    WORKERS[func_name].delete self
+    @capabilities.delete func_name
+  end
+  
+  def reset_abilities
+    @capabilities.each do |cap|
+      cant_do cap
+    end
   end
   
   def set_client_id(worker_id = nil)
@@ -222,49 +322,43 @@ module Rgearmand
     @worker_id = worker_id 
   end
   
-  def work_fail
-    
+  def send_client(packet_type, job_handle, *args)
+    packet = generate(packet_type, job_handle, args)
+    client = JOBS[job_handle][:client]
+    client.andand.send_data(packet)
+  end
+  
+  def work_data(job_handle, data)
+    send_client :work_data, job_handle, data
+  end
+  
+  def work_warning(job_handle, data)
+    send_client :work_warning, job_handle, data
+  end
+  
+  def work_status(job_handle, numerator, denominator)
+    JOBS[job_handle][:numerator] = numerator
+    JOBS[job_handle][:denominator] = denominator
+  end
+  
+  def work_exception(job_handle, data)
+    send_client :work_exception, job_handle, data
+    dequeue job_handle
+  end
+  
+  def work_fail(job_handle)
+    send_client :work_complete, job_handle
+    dequeue job_handle
   end
   
   def work_complete(job_handle, data)
-    packet = generate(:work_complete, [job_handle, data])
-    uniq = JOBS[job_handle][:uniq]
-    client = JOBS[job_handle][:client]
-    client.andand.send_data(packet)
+    send_client :work_complete, job_handle, data
+    dequeue job_handle
+  end
+    
 
-    JOBS.delete(job_handle)
-    
-    key = "#{HOSTNAME}-#{uniq}"
-    puts "Checking for #{key} in persistent queue"
-    if PQUEUE.sismember(HOSTNAME, key)
-      if !PQUEUE.exists key 
-        puts "Removing job from persistent queue"
-        PQUEUE.del key
-      end
-      PQUEUE.srem HOSTNAME, key
-    end
-  end
-  
-  def submit_job(func_name, uniq, data)
-    job_handle = enqueue(:func_name => func_name, :uniq => uniq, :data => data, :persist => true)
-   
-    JOBS[job_handle] = {:client => self , :uniq => uniq}
-    respond :job_created, job_handle
-    
-    puts "QUEUE: #{QUEUES[func_name][:normal].inspect}"
-    
-    WORKERS.has_key?(func_name) && WORKERS[func_name].each do |w|
-      puts "Sending NOOP to #{w}"
-      packet = generate :noop
-      w.send_data(packet)
-    end
-    
-    #puts "SJ: #{uniq} -- #{data}"
-    #respond :job_created, "H:lap:1"
-    #respond :work_complete, "H:lap:1", data.reverse
-  end
-  
 end
+
 class GearmanServer
   include Rgearmand
 
@@ -272,38 +366,44 @@ class GearmanServer
     # LOAD
     # Read jobs from the persistent queue
     PQUEUE.smembers(HOSTNAME).andand.each do |key|
-      puts "Found key: #{key}"
+      logger.debug "Found key: #{key}"
       if PQUEUE.exists key
         jdata = PQUEUE.get("#{key}")
-        puts "Found data: #{jdata}"
+        logger.debug "Found data: #{jdata}"
         if jdata.nil?
-          puts "Empty data, removing key... "
+          logger.debug "Empty data, removing key... "
           result = PQUEUE.del key
-          puts "Deleted #{result} keys"
+          logger.debug "Deleted #{result} keys"
         else 
           job = JSON.parse(jdata)
-          puts "Job: #{job}"
+          logger.debug "Job: #{job}"
           if job[:uniq].nil?
             job[:uniq] = key.split("-")[1]
           end
           job_handle = self.enqueue job
-          puts "Enqueued with handle #{job_handle}"
+          logger.debug "Enqueued with handle #{job_handle}"
         end
       else
-        puts "Empty job, removing key."
+        logger.debug "Empty job, removing key."
         PQUEUE.srem HOSTNAME, key
       end
+      
     end
+
+    require 'manager'
 
     EventMachine::run {
       EventMachine::start_server "127.0.0.1", 4731, Rgearmand
+      Manager.run!({:port => 3000})
     }
+    
+    
   end
 end
 
 
 
-puts "#{HOSTNAME} starting up..."
+logger.debug "#{HOSTNAME} starting up..."
 RubyProf.start
 gm = GearmanServer.new()
 result = RubyProf.stop

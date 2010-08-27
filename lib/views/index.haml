@@ -1,0 +1,16 @@
+%table{:class => "joblist"}
+  %thead
+    %colgroup
+      %col{:width => '480px'}
+      %col{:width => '75px'}
+    %tr
+      %th Function
+      %th # of jobs
+  %tbody
+  - @queues.each do |name, priorities|
+    - priorities.each do |p, queue|
+      %tr
+        %td
+          %a{:title => "#{name}:#{p}", :href => "/queues/#{name}:#{p}"} #{name}:#{p}
+        %td
+          #{queue.count}
