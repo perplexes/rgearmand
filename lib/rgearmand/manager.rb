@@ -5,6 +5,7 @@ require 'sinatra/static_assets'
 require 'less'
 require "sinatra/reloader"
 require 'json'
+require 'logger'
 
 use Rack::Lint
 

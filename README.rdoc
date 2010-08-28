@@ -1,6 +1,11 @@
 = rgearmand
 
-Description goes here.
+A ruby gearman server.
+
+== Todo
+
+* Choose a good persistent queue.
+* Test the crap out of it.
 
 == Note on Patches/Pull Requests
  

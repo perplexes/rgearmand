@@ -1,0 +1,31 @@
+#!/usr/bin/env ruby
+$: << File.dirname(__FILE__)
+GEARMAN_ENV = ENV["GEARMAN_ENV"] || "development"
+require 'lib/rgearmand'
+
+  
+def logger
+  @logger ||= if ENV['LOG_TO_STDOUT']
+    Logger.new(STDOUT)
+  else
+    Logger.new("rgearmand.log", File::WRONLY | File::APPEND)
+  end
+  @logger.level = Logger::DEBUG
+  @logger
+end
+
+logger.debug "#{HOSTNAME} starting up..."
+if GEARMAN_ENV == 'development'
+  require 'ruby-prof'
+  RubyProf.start
+end
+
+gm = GearmanServer.new()
+gm.start
+
+if GEARMAN_ENV == 'development'
+  result = RubyProf.stop
+  # Print a flat profile to text
+  printer = RubyProf::FlatPrinter.new(result)
+  printer.print(STDOUT, 0)
+end
