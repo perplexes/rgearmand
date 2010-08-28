@@ -1,21 +1,9 @@
-begin
-  # Require the preresolved locked set of gems.
-  require File.expand_path('/../../.bundle/environment', __FILE__)
-rescue LoadError
-  puts "loaderror"
-  # Fallback on doing the resolve at runtime.
-  require "rubygems"
-  require "bundler"
+# Fallback on doing the resolve at runtime.
+require "rubygems"
+require "bundler"
 
-  Bundler.setup(:default, GEARMAN_ENV.to_sym)
-end
-
-require 'redis'
-require 'algorithms'
-require 'ruby-debug'
-require 'andand'
-require 'eventmachine'
-
+Bundler.setup
+Bundler.require(:default, GEARMAN_ENV.to_sym)
 
 class Containers::Heap
   def stored
