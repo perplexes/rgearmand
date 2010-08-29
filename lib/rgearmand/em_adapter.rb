@@ -17,12 +17,9 @@ module Rgearmand
     def unbind
       logger.debug "-- someone disconnected from regearmand!"
     end
-
-    def receive_data(data)
+    
+    def parse_packets(data)
       offset = 0
-      logger.debug "receive <<< #{data.inspect}"
-      logger.debug "length <<< #{data.length}"
-
       while(offset < data.length)
         header = data[offset+0..offset+11]
         type = header[1..3].to_s
@@ -36,7 +33,16 @@ module Rgearmand
         logger.debug "Cmd: #{cmd}"
         logger.debug "Datalen: #{datalen}"
         logger.debug "Data: #{args}"
+        
+        yield cmd, args
+      end
+    end
 
+    def receive_data(data)
+      logger.debug "receive <<< #{data.inspect}"
+      logger.debug "length <<< #{data.length}"
+
+      parse_packets(data) do |cmd, args|
         self.send(cmd, *args)
       end
     end
