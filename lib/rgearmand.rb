@@ -1,9 +1,19 @@
-# Fallback on doing the resolve at runtime.
+GEARMAN_ENV ||= ENV["GEARMAN_ENV"] || "development"
 require "rubygems"
 require "bundler"
 
 Bundler.setup
 Bundler.require(:default, GEARMAN_ENV.to_sym)
+
+def logger
+  @logger ||= if ENV['LOG_TO_STDOUT']
+    Logger.new(STDOUT)
+  else
+    Logger.new("rgearmand.log", File::WRONLY | File::APPEND)
+  end
+  @logger.level = Logger::DEBUG
+  @logger
+end
 
 class Containers::Heap
   def stored

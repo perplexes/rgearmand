@@ -11,6 +11,8 @@ gem 'sinatra-reloader'
 gem 'haml'
 gem 'less'
 
+gem 'shoulda'
+
 group :development do
   gem "wirble"
   gem 'ruby-prof'

@@ -44,7 +44,10 @@ end
 
 optparse.parse!
 
-
+if ARGV.length != 1
+  puts "Unique hostname identifier required!"
+  exit
+end
 
 # -- Main 
 

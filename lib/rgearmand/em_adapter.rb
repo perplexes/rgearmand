@@ -18,9 +18,8 @@ module Rgearmand
       logger.debug "-- someone disconnected from regearmand!"
     end
 
-    def receive_data(data)
-      logger.debug "MESSAGE!!!: #{data}"
-      if data[0] != "\0"
+    def parse_packets(data)
+      if data[0] != 0
         logger.debug "control message <<< #{data.inspect}"
         if data[0..2] == "HA "
           logger.debug "ha message"
@@ -49,10 +48,6 @@ module Rgearmand
         end
       else
         offset = 0
-
-        logger.debug "receive <<< #{data.inspect}"
-        logger.debug "length <<< #{data.length}"
-
         while(offset < data.length)
           header = data[offset+0..offset+11]
           type = header[1..3].to_s
@@ -67,8 +62,17 @@ module Rgearmand
           logger.debug "Datalen: #{datalen}"
           logger.debug "Data: #{args}"
 
-          self.send(cmd, *args)
-        end
+          yield cmd, args
+        end        
+      end
+    end
+
+    def receive_data(data)
+      logger.debug "receive <<< #{data.inspect}"
+      logger.debug "length <<< #{data.length}"
+
+      parse_packets(data) do |cmd, args|
+        self.send(cmd, *args)
       end
       
     end
@@ -93,8 +97,12 @@ module Rgearmand
     
     def send_client(packet_type, job_handle, *args)
       packet = generate(packet_type, job_handle, args)
-      client = JOBS[job_handle][:client]
-      client.andand.send_data(packet)
+      if JOBS[job_handle]
+        client = JOBS[job_handle][:client]
+        client.andand.send_data(packet)
+      else
+        logger.debug "No client for job handle #{job_handle}..."
+      end
     end
     
   end
