@@ -5,7 +5,11 @@ class GearmanServer
   include Rgearmand::ClientRequests
   include Rgearmand::WorkerRequests
   include Rgearmand::WorkerQueue
-
+  include Rgearmand::Availability 
+  
+  def initialize
+  end
+  
   def start
     # LOAD
     # Read jobs from the persistent queue
@@ -32,11 +36,22 @@ class GearmanServer
         PQUEUE.srem HOSTNAME, key
       end
       
-      EventMachine::run {
-        EventMachine::start_server "127.0.0.1", 4731, Rgearmand
-        #Manager.run!({:port => 3000})
-      }
-    end
+    end  
+    
+    EventMachine::run {
+      logger.info "Starting server on #{OPTIONS[:ip]}:#{OPTIONS[:port]}"
+      EventMachine::start_server OPTIONS[:ip], OPTIONS[:port], Rgearmand
+
+      if OPTIONS[:puppetmaster]
+        (nodename, ip, port) = OPTIONS[:puppetmaster].split(":")
+        NEIGHBORS[nodename] = { :ip => ip, :port => port }
+      end
+      
+      timer = EventMachine::PeriodicTimer.new(5) do
+         self.emit_heartbeat
+      end
+
+    }
 
     
 

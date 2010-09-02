@@ -19,26 +19,58 @@ module Rgearmand
     end
 
     def receive_data(data)
-      offset = 0
-      logger.debug "receive <<< #{data.inspect}"
-      logger.debug "length <<< #{data.length}"
+      logger.debug "MESSAGE!!!: #{data}"
+      if data[0] != "\0"
+        logger.debug "control message <<< #{data.inspect}"
+        if data[0..2] == "HA "
+          logger.debug "ha message"
+          args = data.split(" ")
+          ha = args.shift
+          cmd = "ha_#{args.shift.downcase}"
+          hostname = args.shift
+          (ip,port) = args.shift.split(":")
+          
+          if NEIGHBORS[hostname].nil?
+            newnode = true
+          else
+            newnode = false
+          end
+          
+          # Initialize if need be
+          NEIGHBORS[hostname] ||= {}
 
-      while(offset < data.length)
-        header = data[offset+0..offset+11]
-        type = header[1..3].to_s
-        cmd =  COMMANDS[header[4..7].unpack('N').first]
-        datalen = header[8..11].unpack('N').first
-        args = data[offset+12..offset+12+datalen].split("\0")
+          # Store their data
+          NEIGHBORS[hostname][:ip] = ip
+          NEIGHBORS[hostname][:port] = port
+          NEIGHBORS[hostname][:new] = newnode
+          
+          self.send(cmd, hostname, *args)
+          
+        end
+      else
+        offset = 0
 
-        offset = offset + datalen + 12
+        logger.debug "receive <<< #{data.inspect}"
+        logger.debug "length <<< #{data.length}"
 
-        logger.debug "Type: #{type}"
-        logger.debug "Cmd: #{cmd}"
-        logger.debug "Datalen: #{datalen}"
-        logger.debug "Data: #{args}"
+        while(offset < data.length)
+          header = data[offset+0..offset+11]
+          type = header[1..3].to_s
+          cmd =  COMMANDS[header[4..7].unpack('N').first]
+          datalen = header[8..11].unpack('N').first
+          args = data[offset+12..offset+12+datalen].split("\0")
 
-        self.send(cmd, *args)
+          offset = offset + datalen + 12
+
+          logger.debug "Type: #{type}"
+          logger.debug "Cmd: #{cmd}"
+          logger.debug "Datalen: #{datalen}"
+          logger.debug "Data: #{args}"
+
+          self.send(cmd, *args)
+        end
       end
+      
     end
     
     def generate(name, *args)

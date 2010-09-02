@@ -61,8 +61,8 @@ COMMANDS = {
 COMMAND_INV = COMMANDS.invert
 
 PRIORITIES = {
-  1 => :high, 
-  2 => :normal, 
+  1 => :high,
+  2 => :normal,
   3 => :low
 }
 
@@ -74,11 +74,13 @@ JOBS = {}
 CLIENTS = {}
 NEIGHBORS = {}
 HOSTNAME = ARGV[0]
+PORT = nil
 
 # Signals
 Signal.trap('INT') { EM.stop }
 Signal.trap('TERM'){ EM.stop }
 
+require 'rgearmand/availability'
 require 'rgearmand/client_requests'
 require 'rgearmand/worker_requests'
 require 'rgearmand/em_adapter'
@@ -92,4 +94,5 @@ module Rgearmand
   include Rgearmand::ClientRequests
   include Rgearmand::WorkerRequests
   include Rgearmand::WorkerQueue
+  include Rgearmand::Availability
 end

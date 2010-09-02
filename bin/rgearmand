@@ -1,14 +1,60 @@
 #!/usr/bin/env ruby
 $: << File.dirname(__FILE__)
 GEARMAN_ENV = ENV["GEARMAN_ENV"] || "development"
-require 'lib/rgearmand'
 
+require 'optparse'
+
+# Parse options, then proceed
+
+OPTIONS = {}
+
+optparse = OptionParser.new do |opts|
+  # Set a banner, displayed at the top
+  # of the help screen.
+  opts.banner = "Usage: rgearmand [options] hostname"
+
+  # Define the options, and what they do
+  OPTIONS[:port] = 4730
+  opts.on( '-p', '--port PORT', 'Listen on PORT' ) do |port|
+    OPTIONS[:port] = port.to_i
+  end
+  
+  OPTIONS[:logfile] = "rgearmand.log"
+  opts.on( '-l', '--logfile FILE', 'Write log to FILE' ) do |file|
+    OPTIONS[:logfile] = file
+  end
+
+  OPTIONS[:ip] = "0.0.0.0"
+  opts.on('-b', '--bind IP', 'Bind to IP (default is all IPs)') do |ip|
+    OPTIONS[:ip] = ip
+  end
+  
+  OPTIONS[:puppetmaster] = nil
+  opts.on("-m", "--master NODENAME:IP:PORT", "Master node (initially) to notify we're online") do |master|
+    OPTIONS[:puppetmaster] = master
+  end
+  
+  # This displays the help screen, all programs are
+  # assumed to have this option.
+  opts.on( '-h', '--help', 'Display this screen' ) do
+    puts opts
+    exit
+  end
+end  
+
+optparse.parse!
+
+
+
+# -- Main 
+
+require 'lib/rgearmand'
   
 def logger
   @logger ||= if ENV['LOG_TO_STDOUT']
     Logger.new(STDOUT)
   else
-    Logger.new("rgearmand.log", File::WRONLY | File::APPEND)
+    Logger.new(OPTIONS[:logfile], File::WRONLY | File::APPEND)
   end
   @logger.level = Logger::DEBUG
   @logger
@@ -20,7 +66,7 @@ if GEARMAN_ENV == 'development'
   RubyProf.start
 end
 
-gm = GearmanServer.new()
+gm = GearmanServer.new
 gm.start
 
 if GEARMAN_ENV == 'development'
