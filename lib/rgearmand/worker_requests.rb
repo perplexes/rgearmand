@@ -2,26 +2,19 @@ module Rgearmand
   module WorkerRequests
     # 1   CAN_DO              REQ    Worker
     def can_do(func_name)
-      unless WORKERS.has_key?(func_name) 
-        WORKERS[func_name] = []
-      end
-
-      unless @capabilities.include?(func_name)
-        @capabilities << func_name
-      end
-
-      WORKERS[func_name] << self
+      @capabilities << func_name
+      worker_queue.can_do(func_name, self)
 
       logger.debug "Workers"
       logger.debug "-------"
-      logger.debug WORKERS.inspect
+      logger.debug worker_queue.workers.inspect
     end
 
     # 2   CANT_DO             REQ    Worker
     def cant_do(func_name)
       logger.debug "Unregistering #{func_name}"
-      WORKERS[func_name].delete self
-      @capabilities.delete func_name
+      worker_queue.cant_do(func_name, self)
+      @capabilities.delete(func_name)
     end
 
     # 3   RESET_ABILITIES     REQ    Worker
@@ -36,66 +29,41 @@ module Rgearmand
 
     # 9   GRAB_JOB            REQ    Worker
     def grab_job(unique = false)
-      @capabilities.each do |capability|
-        [:high, :normal, :low].each do |priority|
-          next unless QUEUES.has_key?(capability)
-          jobqueue = QUEUES[capability][priority]
-          #logger.debug jobqueue.inspect
-          if (jobqueue.size > 0) 
-            job = jobqueue.next
-
-            if job[:timestamp] == 0 || job[:timestamp] <= Time.now().to_i
-              jobqueue.pop
-              logger.debug job.inspect
-              logger.debug "Found job: #{job.inspect}"
-
-              if !JOBS.has_key? job[:job_handle]
-                logger.debug "Adding to run queue..."
-                JOBS[job[:job_handle]] = job
-              end
-
-              if unique
-                respond :job_assign_uniq, job[:job_handle], capability, job[:uniq], job[:data]
-              else 
-                respond :job_assign, job[:job_handle], capability, job[:data]
-              end
-
-              return
-            else 
-              logger.debug "No jobs ready to run"
-            end
-          end
+      if job = worker_queue.grab_job(@capabilities)
+        if unique
+          respond :job_assign_uniq, job[:job_handle], job[:func_name], job[:uniq], job[:data]
+        else 
+          respond :job_assign, job[:job_handle], job[:func_name], job[:data]
         end
+      else
+        logger.debug "No job!"
+        respond :no_job
       end
-
-      logger.debug "No job!"
-      respond :no_job
     end
 
     # 12  WORK_STATUS         REQ    Worker
     # 12  WORK_STATUS         RES    Client
     def work_status(job_handle, numerator, denominator)
-      JOBS[job_handle][:numerator] = numerator
-      JOBS[job_handle][:denominator] = denominator
+      worker_queue.set_status(numerator, denominator)
     end
 
     # 13  WORK_COMPLETE       REQ    Worker
     # 13  WORK_COMPLETE       RES    Client
     def work_complete(job_handle, data)
       send_client :work_complete, job_handle, data
-      dequeue job_handle
+      worker_queue.dequeue job_handle
     end
 
     # 14  WORK_FAIL           REQ    Worker
     # 14  WORK_FAIL           RES    Client
     def work_fail(job_handle)
       send_client :work_complete, job_handle
-      dequeue job_handle
+      worker_queue.dequeue job_handle
     end
 
     # 22  SET_CLIENT_ID       REQ    Worker
     def set_client_id(worker_id = nil)
-      if worker_id == nil
+      if worker_id.nil?
         worker_id = rand(36**8).to_s()
       end
       @worker_id = worker_id 
@@ -112,7 +80,7 @@ module Rgearmand
     # 25  WORK_EXCEPTION      RES    Client
     def work_exception(job_handle, data)
       send_client :work_exception, job_handle, data
-      dequeue job_handle
+      worker_queue.dequeue job_handle
     end
 
     # 26  OPTION_REQ          REQ    Client/Worker

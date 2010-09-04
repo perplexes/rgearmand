@@ -1,13 +1,13 @@
 module Rgearmand
   module ClientRequests
     # 7   SUBMIT_JOB          REQ    Client
-    def submit_job(func_name, uniq, data)
-      job_handle = enqueue(:func_name => func_name, :uniq => uniq, :data => data, :persist => true)
+    def submit_job(func_name, uniq, data = nil)
+      job_handle = worker_queue.enqueue(:func_name => func_name, :uniq => uniq, :data => data, :persist => true)
 
-      JOBS[job_handle] = {:client => self , :uniq => uniq}
+      worker_queue.add(job_handle, :client => self, :uniq => uniq)
       respond :job_created, job_handle
 
-      WORKERS.has_key?(func_name) && WORKERS[func_name].each do |w|
+      worker_queue.each_worker(func_name) do |w|
         logger.debug "Sending NOOP to #{w}"
         packet = generate :noop
         w.send_data(packet)
@@ -16,15 +16,7 @@ module Rgearmand
 
     # 15  GET_STATUS          REQ    Client
     def get_status(job_handle)
-      unless JOBS[job_handle][:numerator].nil?
-        # We have status, so send it off
-        numerator = JOBS[job_handle][:numerator]
-        denominator = JOBS[job_handle][:denominator]
-        packet = generate :status_res, job_handle, 1, 0, numerator, denominator 
-      else
-        # We don't have a status for this packet
-        packet = generate :status_res, job_handle, 0, 0, 0, 0
-      end
+      respond :status_res, job_handle, *worker_queue.status(job_handle)
     end
 
     # 16  ECHO_REQ            REQ    Client/Worker
@@ -35,7 +27,7 @@ module Rgearmand
 
     # 18  SUBMIT_JOB_BG       REQ    Client
     def submit_job_bg(func_name, uniq, data)
-      job_handle = enqueue(:func_name => func_name, :uniq => uniq, :data => data, :persist => true)
+      job_handle = worker_queue.enqueue(:func_name => func_name, :uniq => uniq, :data => data, :persist => true)
       respond :job_created, job_handle
     end
 
@@ -70,7 +62,13 @@ module Rgearmand
     # 36  SUBMIT_JOB_EPOCH    REQ    Client
     def submit_job_epoch(func_name, uniq, epoch, data)
       logger.debug "Epoch job submission"
-      job_handle = enqueue(:func_name => func_name, :uniq => uniq, :data => data, :timestamp => epoch, :persist => true)
+      job_handle = worker_queue.enqueue(
+        :func_name => func_name,
+        :uniq => uniq,
+        :data => data,
+        :timestamp => epoch,
+        :persist => true)
+        
       respond :job_created, job_handle
     end
   end

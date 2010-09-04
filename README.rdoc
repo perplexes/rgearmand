@@ -7,6 +7,14 @@ A ruby gearman server.
 * Choose a good persistent queue.
 * Test the crap out of it.
 
+== Plugins
+
+Plugins can register themselves for:
+
+* Options parsing through Rgearmand.options
+* After-server initialization through Rgearmand.after_init
+* Packet parsing for control messages through Rgearmand.packet_match / control_packet
+
 == Note on Patches/Pull Requests
  
 * Fork the project.

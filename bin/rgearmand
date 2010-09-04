@@ -2,6 +2,18 @@
 $: << File.dirname(__FILE__)
 GEARMAN_ENV = ENV["GEARMAN_ENV"] || "development"
 
+require 'lib/rgearmand'
+  
+def logger
+  @logger ||= if ENV['LOG_TO_STDOUT']
+    Logger.new(STDOUT)
+  else
+    Logger.new(OPTIONS[:logfile], File::WRONLY | File::APPEND)
+  end
+  @logger.level = Logger::DEBUG
+  @logger
+end
+
 require 'optparse'
 
 # Parse options, then proceed
@@ -29,10 +41,7 @@ optparse = OptionParser.new do |opts|
     OPTIONS[:ip] = ip
   end
   
-  OPTIONS[:puppetmaster] = nil
-  opts.on("-m", "--master NODENAME:IP:PORT", "Master node (initially) to notify we're online") do |master|
-    OPTIONS[:puppetmaster] = master
-  end
+  Rgearmand.call_optionses(opts)
   
   # This displays the help screen, all programs are
   # assumed to have this option.
@@ -44,33 +53,23 @@ end
 
 optparse.parse!
 
-if ARGV.length != 1
-  puts "Unique hostname identifier required!"
-  exit
-end
+# We'll get the hostname from `hostname`
+# if ARGV.length != 1
+#   puts "Unique hostname identifier required!"
+#   exit
+# end
+
+
 
 # -- Main 
 
-require 'lib/rgearmand'
-  
-def logger
-  @logger ||= if ENV['LOG_TO_STDOUT']
-    Logger.new(STDOUT)
-  else
-    Logger.new(OPTIONS[:logfile], File::WRONLY | File::APPEND)
-  end
-  @logger.level = Logger::DEBUG
-  @logger
-end
-
-logger.debug "#{HOSTNAME} starting up..."
+logger.debug "Gearmand starting up..."
 if GEARMAN_ENV == 'development'
   require 'ruby-prof'
   RubyProf.start
 end
 
-gm = GearmanServer.new
-gm.start
+Rgearmand::GearmanServer.start
 
 if GEARMAN_ENV == 'development'
   result = RubyProf.stop

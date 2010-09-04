@@ -21,31 +21,7 @@ module Rgearmand
     def parse_packets(data)
       if data[0] != 0
         logger.debug "control message <<< #{data.inspect}"
-        if data[0..2] == "HA "
-          logger.debug "ha message"
-          args = data.split(" ")
-          ha = args.shift
-          cmd = "ha_#{args.shift.downcase}"
-          hostname = args.shift
-          (ip,port) = args.shift.split(":")
-          
-          if NEIGHBORS[hostname].nil?
-            newnode = true
-          else
-            newnode = false
-          end
-          
-          # Initialize if need be
-          NEIGHBORS[hostname] ||= {}
-
-          # Store their data
-          NEIGHBORS[hostname][:ip] = ip
-          NEIGHBORS[hostname][:port] = port
-          NEIGHBORS[hostname][:new] = newnode
-          
-          self.send(cmd, hostname, *args)
-          
-        end
+        Rgearmand.control_packet(data)
       else
         offset = 0
         while(offset < data.length)
@@ -97,12 +73,7 @@ module Rgearmand
     
     def send_client(packet_type, job_handle, *args)
       packet = generate(packet_type, job_handle, args)
-      if JOBS[job_handle]
-        client = JOBS[job_handle][:client]
-        client.andand.send_data(packet)
-      else
-        logger.debug "No client for job handle #{job_handle}..."
-      end
+      worker_queue.client(job_handle){|c| c.send_data packet}
     end
     
   end

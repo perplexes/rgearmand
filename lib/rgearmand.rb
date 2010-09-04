@@ -3,7 +3,7 @@ require "rubygems"
 require "bundler"
 
 Bundler.setup
-Bundler.require(:default, GEARMAN_ENV.to_sym)
+Bundler.require(:default, GEARMAN_ENV)
 
 def logger
   @logger ||= if ENV['LOG_TO_STDOUT']
@@ -70,39 +70,50 @@ COMMANDS = {
 }
 COMMAND_INV = COMMANDS.invert
 
-PRIORITIES = {
-  1 => :high,
-  2 => :normal,
-  3 => :low
-}
-
-PQUEUE = Redis.new(:host => "127.0.0.1", :port => 6379)
-QUEUES = {}
-WORKERS = {}
-STATE = {}
-JOBS = {}
-CLIENTS = {}
-NEIGHBORS = {}
-HOSTNAME = ARGV[0]
-PORT = nil
-
 # Signals
 Signal.trap('INT') { EM.stop }
 Signal.trap('TERM'){ EM.stop }
 
-require 'rgearmand/availability'
-require 'rgearmand/client_requests'
-require 'rgearmand/worker_requests'
-require 'rgearmand/em_adapter'
-require 'rgearmand/worker_queue'
+# TODO: Need a round-robin queue for workers.
+module Rgearmand
+  def options(&block)
+    (@optionses ||= []) << block
+  end
+  module_function :options
+  
+  def call_optionses(object)
+    @optionses.each{|c| c.call(object)}
+  end
+  module_function :call_optionses
+  
+  def after_init(&block)
+    (@after_inits ||= []) << block
+  end
+  module_function :after_init
+  
+  def call_after_inits
+    @after_inits.each{|c| c.call}
+  end
+  module_function :call_after_inits
+  
+  def packet_match(string, &block)
+    (@packet_matches ||= {}).merge!(string => block)
+  end
+  module_function :packet_match
+  
+  def control_packet(data)
+    @packet_matches.find{|s| data[0..(s.size - 1)] == s}.call(data, connection)
+  end
+end
+
 require 'rgearmand/gearman_server'
 require 'rgearmand/manager'
 
-# TODO: Need a round-robin queue for workers.
-module Rgearmand
-  include Rgearmand::EmAdapter
-  include Rgearmand::ClientRequests
-  include Rgearmand::WorkerRequests
-  include Rgearmand::WorkerQueue
-  include Rgearmand::Availability
+
+Dir[File.dirname(__FILE__) + '/../plugins/**/lib'].each do |dir|
+  $: << dir
+end
+
+Dir[File.dirname(__FILE__) + '/../plugins/**/init.rb'].each do |file|
+  load file
 end

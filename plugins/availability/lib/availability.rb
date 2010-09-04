@@ -1,12 +1,29 @@
-
 require 'socket'
 include Socket::Constants
 
 module Rgearmand
-  module Availability
-   
+  class Availability
     MAX_NODE_TIMEOUT = 10
     MAX_NODE_ERRORS = 2
+    
+    def initialize
+      @neighbors = {}
+      Rgearmand.packet_match("HA ") do |data, connection|
+        logger.debug "ha message"
+        args = data.split(" ")
+        ha = args.shift
+        cmd = "ha_#{args.shift.downcase}"
+        hostname = args.shift
+        ip, port = args.shift.split(":")
+
+        self.add_neighbor(hostname, :ip => ip, :port => port, :new => @neighbors[hostname].nil?)
+        self.send(cmd, hostname, *args)
+      end
+    end
+    
+    def add_neighbor(name, options)
+      @neighbors[name] = options
+    end
     
     # HA command packets
     def ha_heartbeat(hostname, *args)
@@ -14,16 +31,16 @@ module Rgearmand
       logger.debug "Received heartbeat from #{hostname} at #{time}"
       update_neighbor_table(hostname, time)
       
-      if NEIGHBORS[hostname][:new]
+      if @neighbors[hostname][:new]
         logger.debug "New node..."
         # new node? get them up to speed!
-        NEIGHBORS.each do |host, hostdata|
+        @neighbors.each do |host, hostdata|
           next if host == hostname || host == HOSTNAME
           logger.debug("Sending #{hostname} info on #{host}")
           send_data("HA HEARTBEAT #{host} #{hostdata[:ip]}:#{hostdata[:port]} #{hostdata[:last_seen]}\n")
         end
         
-        NEIGHBORS[hostname][:new] = false
+        @neighbors[hostname][:new] = false
         logger.debug "Done getting them up to speed."
       end
       
@@ -33,7 +50,7 @@ module Rgearmand
     def emit_heartbeat
       my_port = OPTIONS[:port]
       now = Time.now().to_i
-      NEIGHBORS.each do |hostname, hostdata|
+      @neighbors.each do |hostname, hostdata|
         
         next if hostdata[:status] == :dead
         
@@ -67,10 +84,10 @@ module Rgearmand
     end
     
     def update_neighbor_table(hostname, time)
-      NEIGHBORS[hostname] ||= {}
+      @neighbors[hostname] ||= {}
       
-      NEIGHBORS[hostname][:status] = :alive
-      NEIGHBORS[hostname][:last_seen] = time
+      @neighbors[hostname][:status] = :alive
+      @neighbors[hostname][:last_seen] = time
       # TODO: 
       # 1. Check if neighbor has flipped from dead to alive
       # 2. True? Relinquish any jobs we stole from them back to their queue
@@ -80,13 +97,13 @@ module Rgearmand
     def prune_neighbor_table
       now = Time.now().to_i
       
-      NEIGHBORS.each do |hostname, hostdata|
+      @neighbors.each do |hostname, hostdata|
         last_seen = hostdata[:last_seen]
         time_lapsed = now - last_seen
         if hostdata[:status] == :alive && time_lapsed > MAX_NODE_TIMEOUT
           # Assume neighbor is dead, and assume their jobs
           logger.debug "#{hostname} last seen #{time_lapsed} seconds ago (max: #{MAX_NODE_TIMEOUT}), declaring dead!"
-          NEIGHBORS[hostname][:status] = :dead
+          @neighbors[hostname][:status] = :dead
           # Consume jobs (put up for vote!)
         end
       end
