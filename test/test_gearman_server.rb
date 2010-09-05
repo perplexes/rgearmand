@@ -3,7 +3,7 @@ require 'helper'
 class TestGearmanServer < Test::Unit::TestCase
   context "Protocol" do
     setup do
-      @server = GearmanServer.new
+      @server = Rgearmand::GearmanServer.new(nil)
     end
   
     should "parse protocol packets with one command" do

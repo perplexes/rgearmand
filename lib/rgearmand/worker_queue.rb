@@ -129,8 +129,11 @@ module Rgearmand
       logger.debug "Timestamp: #{timestamp} -> #{timestamp.to_i}"
       @queues[func_name][priority].push({:uniq => uniq, :func_name => func_name, :job_handle => job_handle, :data => data, :timestamp => timestamp.to_i}, timestamp.to_i)
 
-      @persistent_queue.store!(func_name, data, uniq, timestamp)
-
+      if opts[:persist]
+        logger.debug "Persisting!"
+        @persistent_queue.store!(func_name, data, uniq, timestamp)
+      end 
+      
       job_handle
     end
 

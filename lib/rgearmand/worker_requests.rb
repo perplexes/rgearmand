@@ -78,7 +78,7 @@ module Rgearmand
 
     # 25  WORK_EXCEPTION      REQ    Worker
     # 25  WORK_EXCEPTION      RES    Client
-    def work_exception(job_handle, data)
+    def work_exception(job_handle, data = nil)
       send_client :work_exception, job_handle, data
       worker_queue.dequeue job_handle
     end

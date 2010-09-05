@@ -2,7 +2,7 @@ module Rgearmand
   module ClientRequests
     # 7   SUBMIT_JOB          REQ    Client
     def submit_job(func_name, uniq, data = nil)
-      job_handle = worker_queue.enqueue(:func_name => func_name, :uniq => uniq, :data => data, :persist => true)
+      job_handle = worker_queue.enqueue(:func_name => func_name, :uniq => uniq, :data => data, :persist => false)
 
       worker_queue.add(job_handle, :client => self, :uniq => uniq)
       respond :job_created, job_handle

@@ -6,6 +6,7 @@ require 'rgearmand/em_adapter'
 require 'rgearmand/worker_queue'
 require 'rgearmand/persistence/base'
 require 'rgearmand/persistence/redis'
+require 'rgearmand/persistence/mongodb'
 
 module Rgearmand
   class GearmanServer < EventMachine::Connection
@@ -29,8 +30,9 @@ module Rgearmand
       @hostname = `hostname`.chomp
       @port = nil
       @worker_queue = WorkerQueue.new(@hostname)
-      @persistent_queue = PersistentQueue::RedisQueue.new(@worker_queue, :host => "127.0.0.1", :port => 6379, :hostname => @hostname)
-    
+      #@persistent_queue = PersistentQueue::RedisQueue.new(@worker_queue, :host => "127.0.0.1", :port => 6379, :hostname => @hostname)
+      @persistent_queue = PersistentQueue::MongoDBQueue.new(@worker_queue, :host => "127.0.0.1", :port => 27017, :hostname => @hostname)
+      
       EventMachine::run {
         logger.info "Starting server on #{OPTIONS[:ip]}:#{OPTIONS[:port]}"
         EventMachine::start_server OPTIONS[:ip], OPTIONS[:port], self

@@ -10,6 +10,8 @@ gem 'sinatra-static-assets'
 gem 'sinatra-reloader'
 gem 'haml'
 gem 'less'
+gem 'bson_ext'
+gem 'mongo'
 
 gem 'shoulda'
 
