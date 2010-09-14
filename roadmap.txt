@@ -1,0 +1,29 @@
+Stuff that needs to be done:
+
+* Foreground jobs logged to the DB 
+
+* Add fields for:
+** start time
+** finish time
+** status (ERROR, WARNING, SUCCESS, etc.)
+** resulting data (data, exception, etc.)
+** who picked it up (debugging help) 
+
+* Display status of worker network
+** Overall performance (run time averages per queue)
+** Load average (1/5/10 minute load)
+
+* Account stuff
+** Billing / cost per job / balance, etc. 
+** CRUD
+** Chargify
+
+* Job queues
+** View a specific job 
+** Visualize queue load (charts?)
+** Error handling / re-enqueue work
+
+* Double rainbow stuff:
+** Recurring jobs (how many times? similar jobs? wtfhooptywagon?)
+** Recurring queues -- user specifies a queue as recurring and a failure threshold up to which exponential backoff automatically happens
+** SUBMIT_JOB_CRON 
