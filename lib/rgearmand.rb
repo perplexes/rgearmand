@@ -103,12 +103,11 @@ module Rgearmand
   
   def control_packet(data)
     @packet_matches.find{|s| data[0..(s.size - 1)] == s}.call(data, connection)
-  end
+  end  
 end
 
 require 'rgearmand/gearman_server'
-require 'rgearmand/manager'
-
+#require 'rgearmand/manager'
 
 Dir[File.dirname(__FILE__) + '/../plugins/**/lib'].each do |dir|
   $: << dir
@@ -117,3 +116,4 @@ end
 Dir[File.dirname(__FILE__) + '/../plugins/**/init.rb'].each do |file|
   load file
 end
+

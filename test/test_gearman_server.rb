@@ -21,5 +21,6 @@ class TestGearmanServer < Test::Unit::TestCase
       end
       assert_equal packets, [[:echo_req, ['hello']], [:echo_req, ['hello']]]
     end
+    
   end
 end

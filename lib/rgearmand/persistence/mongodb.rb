@@ -13,15 +13,16 @@ module Rgearmand
       def load!
         # LOAD
         # Read jobs from the persistent queue
+        logger.debug "Loading jobs from redis"
         count = 0
+        start_time = Time.now
         @collection.find().each do |job| 
           puts job.inspect
           job_handle = @worker_queue.enqueue(job)
-          logger.debug "Enqueued with handle #{job_handle}"
           count += 1
         end
         
-        logger.debug "Loaded #{count} persisted jobs!"
+        count
       end
     
       def store!(func_name, data, uniq, timestamp)

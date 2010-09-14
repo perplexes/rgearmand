@@ -1,6 +1,8 @@
 #!/usr/bin/env ruby
 $: << File.dirname(__FILE__)
+$: << File.dirname(__FILE__) + '/../'
 GEARMAN_ENV = ENV["GEARMAN_ENV"] || "development"
+APP_ROOT = File.join(File.dirname(__FILE__) , "..")
 
 require 'lib/rgearmand'
   
@@ -10,6 +12,7 @@ def logger
   else
     Logger.new(OPTIONS[:logfile], File::WRONLY | File::APPEND)
   end
+
   @logger.level = Logger::DEBUG
   @logger
 end
@@ -64,7 +67,7 @@ optparse.parse!
 # -- Main 
 
 logger.debug "Gearmand starting up..."
-if GEARMAN_ENV == 'development'
+if GEARMAN_ENV == 'profiling'
   require 'ruby-prof'
   RubyProf.start
 end

@@ -3,7 +3,7 @@ module Rgearmand
     class RedisQueue < Base
       def initialize(queue, options = {:hostname => `hostname`.chomp, :host => "127.0.0.1", :port => 6379, :persist => true})
         @hostname = options[:hostname]
-        @persist = options.delete(:persist)
+        @persist = true
         @redis = Redis.new(options)
         super queue
       end
@@ -11,7 +11,11 @@ module Rgearmand
       def load!
         # LOAD
         # Read jobs from the persistent queue
+        logger.debug "Loading jobs from redis"
+        count = 0
+        
         @redis.smembers(@hostname).andand.each do |key|
+          count += 1
           logger.debug "Found key: #{key}"
           if @redis.exists(key)
             jdata = @redis.get(key)
@@ -26,7 +30,7 @@ module Rgearmand
               if job[:uniq].nil?
                 job[:uniq] = key.split("-")[1]
               end
-              job_handle = @queue.enqueue(job)
+              job_handle = @worker_queue.enqueue(job)
               logger.debug "Enqueued with handle #{job_handle}"
             end
           else
@@ -34,20 +38,23 @@ module Rgearmand
             @redis.srem @hostname, key
           end
         end
+
+        count
       end
     
       def store!(func_name, data, uniq, timestamp)
         return true unless @persist
-      
         key = "#{@hostname} - #{uniq}"
         value = JSON.generate({
           :func_name => func_name,
           :data => data,
           :uniq => uniq,
           :timestamp => timestamp})
+
+        logger.debug "Persisting #{value}"
       
         @redis.set key, value
-        @redis.sadd hostname, key
+        @redis.sadd @hostname, key
       end
     
       def delete!(uniq)

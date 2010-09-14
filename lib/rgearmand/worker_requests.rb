@@ -2,6 +2,15 @@ module Rgearmand
   module WorkerRequests
     # 1   CAN_DO              REQ    Worker
     def can_do(func_name)
+      return if @capabilities.include? func_name
+      
+      # Record worker
+      worker = Worker.find_or_create_by(:worker_id => @worker_id)
+      worker.function_names ||= [] 
+      worker.function_names << func_name
+      logger.debug "Worker capabilities: #{worker.inspect}"
+      worker.save
+      
       @capabilities << func_name
       worker_queue.can_do(func_name, self)
 
@@ -39,6 +48,8 @@ module Rgearmand
         logger.debug "No job!"
         respond :no_job
       end
+      
+      logger.debug "Handed out job"
     end
 
     # 12  WORK_STATUS         REQ    Worker
@@ -51,14 +62,24 @@ module Rgearmand
     # 13  WORK_COMPLETE       RES    Client
     def work_complete(job_handle, data)
       send_client :work_complete, job_handle, data
-      worker_queue.dequeue job_handle
+      
+      job = worker_queue.dequeue job_handle
+      job.status = "Success"
+      job.result = data
+      job.save
+      
+      
     end
 
     # 14  WORK_FAIL           REQ    Worker
     # 14  WORK_FAIL           RES    Client
     def work_fail(job_handle)
-      send_client :work_complete, job_handle
-      worker_queue.dequeue job_handle
+      send_client :work_fail, job_handle
+
+      job = worker_queue.dequeue job_handle
+      job.status = "Failed"
+      job.save
+
     end
 
     # 22  SET_CLIENT_ID       REQ    Worker
@@ -66,7 +87,8 @@ module Rgearmand
       if worker_id.nil?
         worker_id = rand(36**8).to_s()
       end
-      @worker_id = worker_id 
+      @worker_id = worker_id
+      @type = :worker
     end
 
     # 23  CAN_DO_TIMEOUT      REQ    Worker
@@ -80,7 +102,12 @@ module Rgearmand
     # 25  WORK_EXCEPTION      RES    Client
     def work_exception(job_handle, data = nil)
       send_client :work_exception, job_handle, data
-      worker_queue.dequeue job_handle
+
+      job = worker_queue.dequeue job_handle
+      job.status = "Exception"
+      job.result = data
+      job.save
+      
     end
 
     # 26  OPTION_REQ          REQ    Client/Worker
@@ -99,6 +126,7 @@ module Rgearmand
     # 29  WORK_WARNING        RES    Client
     def work_warning(job_handle, data)
       send_client :work_warning, job_handle, data
+
     end
 
     # 30  GRAB_JOB_UNIQ       REQ    Worker

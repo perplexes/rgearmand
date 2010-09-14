@@ -4,7 +4,13 @@ module Rgearmand
     def initialize(worker_queue)
       @worker_queue = worker_queue
       @worker_queue.persistent_queue = self
-      load!
+      start_time = Time.now
+      count = load!
+      end_time = Time.now
+      load_time = end_time - start_time
+      rate = count / load_time rescue 0
+      logger.debug "Loaded #{count} persisted jobs in #{sprintf('%.2f', load_time)} seconds (#{rate} jobs per sec.)!"
+      
     end
     
     def load!

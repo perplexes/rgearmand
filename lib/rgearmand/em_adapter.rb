@@ -4,7 +4,7 @@ module Rgearmand
       logger.info "Connection from someone..."
       @capabilities = []
       @currentjob = nil
-      
+      @type = nil
       super
     end
 
@@ -15,7 +15,17 @@ module Rgearmand
     end
 
     def unbind
-      logger.debug "-- someone disconnected from regearmand!"
+      if @type == :worker
+        logger.debug "-- a worker disconnected!"
+        
+        w = Worker.find(:first, :conditions => {:worker_id => @worker_id})
+        if w != nil
+          logger.debug "Found worker: #{w.inspect}"
+          w.destroy
+        end
+      else
+        logger.debug "-- a client disconnected!"
+      end
     end
 
     def parse_packets(data)
@@ -50,7 +60,6 @@ module Rgearmand
       parse_packets(data) do |cmd, args|
         self.send(cmd, *args)
       end
-      
     end
     
     def generate(name, *args)
