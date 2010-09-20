@@ -72,7 +72,14 @@ if GEARMAN_ENV == 'profiling'
   RubyProf.start
 end
 
-Rgearmand::GearmanServer.start
+begin
+  Rgearmand::GearmanServer.start  
+rescue RuntimeError => e
+  if e.message =~ /no acceptor/
+    $stderr.puts "Looks like you have something else running on port #{OPTIONS[:port]}."
+  end
+  raise
+end
 
 if GEARMAN_ENV == 'development'
   result = RubyProf.stop
