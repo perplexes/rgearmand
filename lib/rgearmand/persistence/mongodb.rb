@@ -13,7 +13,7 @@ module Rgearmand
       def load!
         # LOAD
         # Read jobs from the persistent queue
-        logger.debug "Loading jobs from redis"
+        logger.debug "Loading jobs from mongo"
         count = 0
         start_time = Time.now
         @collection.find().each do |job| 
